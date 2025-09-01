@@ -22,6 +22,7 @@ rpm_packages:
   - sssd-ad
   - samba-common-tools
   - krb5-workstation
+  - yum-utils
 
 # rhel_packages:
 #   - samba-common
