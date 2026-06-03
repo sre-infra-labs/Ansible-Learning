@@ -1,0 +1,48 @@
+---
+# 03-install-mssql.yml
+# Add Microsoft GPG key + SQL Server 2025 apt repo, then install mssql-server.
+
+- name: Install prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg
+      - apt-transport-https
+      - software-properties-common
+    state: present
+    update_cache: true
+
+- name: Download and install Microsoft GPG key (signed-by approach)
+  ansible.builtin.shell:
+    cmd: >
+      curl -fsSL {{ mssql_ms_gpg_key_url }}
+      | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    creates: /usr/share/keyrings/microsoft-prod.gpg
+
+- name: Add SQL Server 2025 repository for Ubuntu 24.04
+  ansible.builtin.shell:
+    cmd: >
+      curl -fsSL {{ mssql_repo_list_url }}
+      | tee /etc/apt/sources.list.d/mssql-server-2025.list
+    creates: /etc/apt/sources.list.d/mssql-server-2025.list
+
+- name: Update apt cache after adding SQL Server 2025 repository
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+
+- name: Install SQL Server 2025 (mssql-server)
+  ansible.builtin.apt:
+    name: mssql-server
+    state: present
+  register: mssql_pkg_installed
+
+- name: Verify mssql-server binary exists
+  ansible.builtin.stat:
+    path: /opt/mssql/bin/mssql-conf
+  register: mssql_conf_stat
+
+- name: Fail if mssql-server was not installed correctly
+  ansible.builtin.fail:
+    msg: "mssql-conf not found at /opt/mssql/bin/mssql-conf – installation may have failed"
+  when: not mssql_conf_stat.stat.exists

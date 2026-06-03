@@ -1,0 +1,91 @@
+---
+# 07-restore-stackoverflow.yml
+# Copy StackOverflow2013.bak from the Ansible control node to sqlbuntu disk2,
+# then restore it. Files land on /mssql-data2.
+#
+# Skip this entire file:  --skip-tags restore
+
+- name: Check if StackOverflow backup file exists on control node
+  ansible.builtin.stat:
+    path: "{{ stackoverflow_bak_src }}"
+  delegate_to: localhost
+  become: false
+  register: bak_src_stat
+
+- name: Fail if backup file is missing on control node
+  ansible.builtin.fail:
+    msg: "Backup not found on control node: {{ stackoverflow_bak_src }}"
+  when: not bak_src_stat.stat.exists
+
+- name: Check if backup already exists on sqlbuntu disk2
+  ansible.builtin.stat:
+    path: "{{ stackoverflow_bak_dest }}"
+  register: bak_dest_stat
+
+- name: Copy StackOverflow2013.bak to sqlbuntu /mssql-data2 (rsync)
+  ansible.posix.synchronize:
+    src: "{{ stackoverflow_bak_src }}"
+    dest: "{{ stackoverflow_bak_dest }}"
+    mode: push
+    compress: false
+  when: not bak_dest_stat.stat.exists
+
+- name: Ensure mssql user owns /mssql-data2 directory (required for RESTORE write access)
+  ansible.builtin.file:
+    path: "{{ disk2_mount }}"
+    owner: "{{ mssql_os_user }}"
+    group: "{{ mssql_os_group }}"
+    mode: '0770'
+    state: directory
+
+- name: Set correct ownership on backup file
+  ansible.builtin.file:
+    path: "{{ stackoverflow_bak_dest }}"
+    owner: "{{ mssql_os_user }}"
+    group: "{{ mssql_os_group }}"
+    mode: '0640'
+
+- name: Check if StackOverflow2013 database already exists and is ONLINE
+  ansible.builtin.command: >
+    /opt/mssql-tools18/bin/sqlcmd -S localhost,{{ mssql_port }} -U sa
+    -Q "SET NOCOUNT ON; SELECT name FROM sys.databases WHERE name = '{{ stackoverflow_db_name }}' AND state_desc = 'ONLINE'"
+    -h -1 -W -C -N
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  register: db_exists_check
+  changed_when: false
+  no_log: true
+
+- name: Deploy restore Python script to sqlbuntu (Jinja2 template)
+  ansible.builtin.template:
+    src: restore-stackoverflow.py.j2
+    dest: /tmp/restore_so2013.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: stackoverflow_db_name not in db_exists_check.stdout
+  no_log: true
+
+- name: Restore StackOverflow2013 (multi-file backup – handles all MOVE clauses)
+  ansible.builtin.command: python3 /tmp/restore_so2013.py
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  register: restore_result
+  async: 7200
+  poll: 30
+  when: stackoverflow_db_name not in db_exists_check.stdout
+  no_log: false
+
+- name: Cleanup restore script from sqlbuntu
+  ansible.builtin.file:
+    path: /tmp/restore_so2013.py
+    state: absent
+
+- name: Report restore result
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'StackOverflow2013 already existed – skipped restore'
+        if stackoverflow_db_name in db_exists_check.stdout
+        else (restore_result.stdout_lines | default(['no output']))
+      }}

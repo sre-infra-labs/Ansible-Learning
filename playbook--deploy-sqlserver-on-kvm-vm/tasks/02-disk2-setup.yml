@@ -1,0 +1,68 @@
+---
+# 02-disk2-setup.yml
+# Partition /dev/vdb (120 GB), format ext4, mount at /mssql-data2, persist in fstab.
+
+- name: Install parted (needed for partition management)
+  ansible.builtin.apt:
+    name: parted
+    state: present
+    update_cache: false
+
+- name: Check if disk2 partition already exists
+  ansible.builtin.stat:
+    path: "{{ disk2_partition }}"
+  register: disk2_part_stat
+
+- name: Create GPT partition table on disk2
+  ansible.builtin.command: parted -s {{ disk2_device }} mklabel gpt
+  when: not disk2_part_stat.stat.exists
+
+- name: Create single primary partition spanning full disk2
+  ansible.builtin.command: parted -s {{ disk2_device }} mkpart primary ext4 0% 100%
+  when: not disk2_part_stat.stat.exists
+
+- name: Wait for partition device node to appear
+  ansible.builtin.wait_for:
+    path: "{{ disk2_partition }}"
+    timeout: 30
+  when: not disk2_part_stat.stat.exists
+
+- name: Check if disk2 partition already has a filesystem
+  ansible.builtin.command: blkid -o value -s TYPE {{ disk2_partition }}
+  register: disk2_fs_check
+  changed_when: false
+  failed_when: false
+
+- name: Format disk2 partition as ext4
+  ansible.builtin.command: mkfs.ext4 -F -L mssql-data2 {{ disk2_partition }}
+  when: disk2_fs_check.stdout.strip() != 'ext4'
+
+- name: Create mount point {{ disk2_mount }}
+  ansible.builtin.file:
+    path: "{{ disk2_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Get UUID of disk2 partition
+  ansible.builtin.command: blkid -o value -s UUID {{ disk2_partition }}
+  register: disk2_uuid
+  changed_when: false
+
+- name: Mount disk2 and persist in /etc/fstab
+  ansible.posix.mount:
+    path: "{{ disk2_mount }}"
+    src: "UUID={{ disk2_uuid.stdout.strip() }}"
+    fstype: "{{ disk2_fstype }}"
+    opts: defaults,noatime
+    state: mounted
+
+- name: Verify disk2 is mounted and show available space
+  ansible.builtin.command: df -h {{ disk2_mount }}
+  register: disk2_df
+  changed_when: false
+
+- name: Report disk2 status
+  ansible.builtin.debug:
+    msg: "{{ disk2_df.stdout_lines }}"

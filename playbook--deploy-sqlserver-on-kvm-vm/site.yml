@@ -1,0 +1,54 @@
+---
+# Deploy SQL Server 2025 Enterprise Developer on sqlbuntu
+#
+# Run full playbook:
+#   ansible-playbook -i hosts.yml site.yml --vault-password-file=../vault-pass
+# Skip StackOverflow restore:
+#   ansible-playbook -i hosts.yml site.yml --vault-password-file=../vault-pass --skip-tags restore
+# Run only specific tag:
+#   ansible-playbook -i hosts.yml site.yml --vault-password-file=../vault-pass --tags network
+
+- name: Deploy SQL Server 2025 on sqlbuntu
+  hosts: sqlbuntu
+  become: true
+  remote_user: ansible
+  gather_facts: true
+  any_errors_fatal: false
+
+  vars_files:
+    - sensitive-values
+    - vars/default.yml
+
+  tasks:
+
+    - name: "[01] Network – bring up enp7s0, route 192.168.0.0/16 via enp1s0"
+      ansible.builtin.import_tasks: tasks/01-network-setup.yml
+      tags: [network]
+
+    - name: "[02] Disk 2 – partition /dev/vdb, format ext4, mount /mssql-data2"
+      ansible.builtin.import_tasks: tasks/02-disk2-setup.yml
+      tags: [disk2]
+
+    - name: "[03] Install SQL Server 2025 engine package"
+      ansible.builtin.import_tasks: tasks/03-install-mssql.yml
+      tags: [install, mssql]
+
+    - name: "[04] Install SQL client tools – sqlcmd, bcp, powershell"
+      ansible.builtin.import_tasks: tasks/04-install-tools.yml
+      tags: [tools, install]
+
+    - name: "[05] Configure SQL Server – dirs, sa password, tempdb, agent, port"
+      ansible.builtin.import_tasks: tasks/05-configure-mssql.yml
+      tags: [configure, mssql]
+
+    - name: "[06] Firewall – open required TCP/UDP ports"
+      ansible.builtin.import_tasks: tasks/06-firewall.yml
+      tags: [firewall]
+
+    - name: "[07] Restore StackOverflow2013 on Disk 2  (skip: --skip-tags restore)"
+      ansible.builtin.import_tasks: tasks/07-restore-stackoverflow.yml
+      tags: [restore, stackoverflow]
+
+    - name: "[08] Validate – all 6 checks from ryzen9 control node"
+      ansible.builtin.import_tasks: tasks/08-verify-connectivity.yml
+      tags: [verify, validate]

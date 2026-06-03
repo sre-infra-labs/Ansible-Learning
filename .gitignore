@@ -35,6 +35,7 @@ vailt_password
 vault-key
 vault_key
 sensitive_values
+sensitive-values
 /work/*
 
 

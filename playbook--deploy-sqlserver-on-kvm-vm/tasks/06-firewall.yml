@@ -1,0 +1,47 @@
+---
+# 06-firewall.yml
+# Install ufw and open all required ports.
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Set ufw default incoming policy to deny
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Set ufw default outgoing policy to allow
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+- name: Allow required TCP ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: "SQL Server / infra"
+  loop: "{{ firewall_tcp_ports }}"
+
+- name: Allow required UDP ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: udp
+    comment: "SQL Server browser / infra"
+  loop: "{{ firewall_udp_ports }}"
+
+- name: Enable ufw (non-interactive)
+  community.general.ufw:
+    state: enabled
+
+- name: Show ufw status
+  ansible.builtin.command: ufw status verbose
+  register: ufw_status
+  changed_when: false
+
+- name: Report firewall rules
+  ansible.builtin.debug:
+    msg: "{{ ufw_status.stdout_lines }}"

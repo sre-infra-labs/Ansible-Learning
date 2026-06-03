@@ -1,0 +1,60 @@
+---
+# 01-network-setup.yml
+# Bring up enp7s0 (NAT/internet) and ensure 192.168.0.0/16 routes via enp1s0.
+# enp1s0 IP / DNS is NOT changed – only routing is adjusted.
+
+- name: Disable cloud-init network config management
+  ansible.builtin.copy:
+    content: "network: {config: disabled}\n"
+    dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Deploy custom netplan (keeps enp1s0 IP, adds enp7s0 DHCP + 192.168.0.0/16 route)
+  ansible.builtin.template:
+    src: netplan-sqlbuntu.yaml.j2
+    dest: /etc/netplan/99-sqlbuntu.yaml
+    owner: root
+    group: root
+    mode: '0600'
+  register: netplan_result
+
+- name: Remove original cloud-init netplan (replaced by 99-sqlbuntu.yaml)
+  ansible.builtin.file:
+    path: /etc/netplan/50-cloud-init.yaml
+    state: absent
+  register: cloud_init_removed
+
+- name: Apply netplan (runs async so SSH over enp1s0 is not interrupted)
+  ansible.builtin.command: netplan apply
+  when: netplan_result.changed or cloud_init_removed.changed
+  async: 60
+  poll: 0
+  register: netplan_apply_job
+
+- name: Wait for enp1s0 SSH to recover (IP unchanged, should be instant)
+  ansible.builtin.wait_for:
+    host: "{{ internal_ip }}"
+    port: 22
+    delay: 5
+    timeout: 90
+    state: started
+  delegate_to: localhost
+  become: false
+  when: netplan_result.changed or cloud_init_removed.changed
+
+- name: Wait for internet connectivity via enp7s0 (packages.microsoft.com)
+  ansible.builtin.uri:
+    url: "https://packages.microsoft.com"
+    method: HEAD
+    timeout: 20
+  register: internet_ok
+  retries: 12
+  delay: 10
+  until: internet_ok.status is defined and internet_ok.status == 200
+  ignore_errors: "{{ ignore_internet_error | default(false) }}"
+
+- name: Report internet status
+  ansible.builtin.debug:
+    msg: "Internet via enp7s0: {{ 'OK' if (internet_ok.status | default(0)) == 200 else 'FAILED – check enp7s0 DHCP' }}"
