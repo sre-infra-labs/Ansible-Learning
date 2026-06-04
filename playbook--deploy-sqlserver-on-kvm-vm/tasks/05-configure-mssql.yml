@@ -54,13 +54,52 @@
 - name: Set TCP port to {{ mssql_port }}
   ansible.builtin.command: /opt/mssql/bin/mssql-conf set network.tcpport {{ mssql_port }}
 
+# ── Create independent sqlserver.service unit ───────────────────────────
+# A full unit file (not a symlink) so systemctl disable mssql-server
+# never removes it.  Conflicts= prevents both units running at once.
+- name: Create /etc/systemd/system/sqlserver.service unit file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sqlserver.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Microsoft SQL Server Database Engine
+      After=network.target auditd.service
+      Documentation=https://docs.microsoft.com/en-us/sql/linux
+      Conflicts=mssql-server.service
+
+      [Service]
+      ExecStart=/opt/mssql/bin/sqlservr
+      User=mssql
+      WorkingDirectory=/var/opt/mssql
+      KillMode=process
+      TimeoutSec=30min
+      LimitNPROC=infinity
+      LimitNOFILE=infinity
+      TasksMax=infinity
+      UMask=007
+      Restart=on-failure
+      StartLimitInterval=120
+      StartLimitBurst=3
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Reload systemd daemon to pick up sqlserver.service
+  ansible.builtin.command: systemctl daemon-reload
+
+- name: Disable mssql-server autostart (use sqlserver instead)
+  ansible.builtin.command: systemctl disable mssql-server
+  ignore_errors: true
+
 # ── Enable + start service ──────────────────────────────────────────────
-- name: Enable and start mssql-server service
-  ansible.builtin.systemd:
-    name: mssql-server
-    enabled: true
-    state: restarted
-    daemon_reload: true
+- name: Enable sqlserver service
+  ansible.builtin.command: systemctl enable sqlserver
+
+- name: Restart sqlserver service
+  ansible.builtin.command: systemctl restart sqlserver
 
 - name: Wait for SQL Server to listen on port {{ mssql_port }}
   ansible.builtin.wait_for:
@@ -104,9 +143,7 @@
   no_log: true
 
 - name: Restart SQL Server so tempdb move takes effect
-  ansible.builtin.systemd:
-    name: mssql-server
-    state: restarted
+  ansible.builtin.command: systemctl restart sqlserver
   when: (tempdb_data_moved is defined and tempdb_data_moved.changed) or
         (tempdb_log_moved is defined and tempdb_log_moved.changed)
 

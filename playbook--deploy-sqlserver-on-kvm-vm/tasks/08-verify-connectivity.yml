@@ -98,7 +98,7 @@
 
 - name: "[VAL-6] Fail if engine is not Running"
   ansible.builtin.fail:
-    msg: "SQL Server Engine is NOT Running – check mssql-server service"
+    msg: "SQL Server Engine is NOT Running – check sqlserver service"
   when: >
     services_check.stdout_lines | select('search', 'MSSQLSERVER') | select('search', 'Running') | list | length == 0
 
