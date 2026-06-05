@@ -57,28 +57,38 @@ Target Config
 Nic enp1s0 should only have a static route for 192.168.0.0/16 via 192.168.100.1
 Nic enp7s0 should have the default route (already given by DHCP, just need to stop enp1s0 from overriding it)
 
-# 1. See the current connection profile names
-nmcli connection show
+# Step 01: Create/edit  /etc/netplan/01-netcfg.yaml :
+-- *******************************************************
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
 
-# 2. Fix enp1s0:
-#    - never install a default route from this interface
-#    - add a static route covering all of 192.168.0.0/16 via the lab gateway
-sudo nmcli connection modify enp1s0 \
-  ipv4.never-default yes \
-  ipv4.routes "192.168.0.0/16 192.168.100.1"
+    enp1s0:
+      dhcp4: false
+      addresses:
+        - 192.168.100.55/24
+      routes:
+        - to: 192.168.0.0/16
+          via: 192.168.100.1
+      # No default route entry → enp1s0 never overrides the default gateway
 
-# 3. Fix enp7s0:
-#    - ensure it IS allowed to provide the default route (DHCP gives 192.168.122.1)
-sudo nmcli connection modify enp7s0 \
-  ipv4.never-default no
+    enp7s0:
+      dhcp4: true
+      # DHCP provides 192.168.122.1 as default gateway — nothing extra needed
+-- *******************************************************
 
-# 4. Apply changes (bring connections down and back up)
-sudo nmcli connection up enp1s0
-sudo nmcli connection up enp7s0
+# Step 02: Apply and verify
+-- *******************************************************
+# 1. Validate the YAML first (dry-run, no changes applied)
+sudo netplan try --timeout 30
 
-# 5. Verify the routing table
+# 2. Apply permanently
+sudo netplan apply
+
+# 3. Verify routing table
 ip route show
-
+-- *******************************************************
 
 Expected Output Should Look Like
 --------------------------------
