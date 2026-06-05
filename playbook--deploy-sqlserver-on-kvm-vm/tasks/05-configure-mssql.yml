@@ -81,11 +81,33 @@
       TasksMax=infinity
       UMask=007
       Restart=on-failure
-      StartLimitInterval=120
-      StartLimitBurst=3
+      RestartSec=10s
+      # Raised from default (3 in 120s) so transient unattended-upgrade
+      # restart storms (needrestart + daemon-reexec) don't permanently
+      # lock the service in start-limit-hit state.
+      StartLimitInterval=600
+      StartLimitBurst=10
 
       [Install]
       WantedBy=multi-user.target
+
+# ── Prevent needrestart from auto-restarting SQL Server ────────────────
+# unattended-upgrades triggers needrestart after every package batch.
+# needrestart sees stale shared libs in sqlservr and issues a systemctl
+# stop/start, which burns through StartLimitBurst and leaves the service
+# in start-limit-hit state until someone runs systemctl start manually.
+- name: Configure needrestart to ignore sqlservr binary
+  ansible.builtin.copy:
+    dest: /etc/needrestart/conf.d/90-sqlserver.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Do not auto-restart SQL Server when shared libraries are upgraded.
+      # SQL Server must be restarted deliberately (after a maintenance window)
+      # to avoid mid-transaction kills and start-limit-hit lockouts.
+      $nrconf{blacklist_rc}{qr(^sqlserver)} = 0;
+      push @{$nrconf{blacklist}}, qr(^/opt/mssql/bin/sqlservr$);
 
 - name: Reload systemd daemon to pick up sqlserver.service
   ansible.builtin.command: systemctl daemon-reload
