@@ -2,16 +2,22 @@
 # 01-network-setup.yml
 # Bring up enp7s0 (NAT/internet) and ensure 192.168.0.0/16 routes via enp1s0.
 # enp1s0 IP / DNS is NOT changed – only routing is adjusted.
+#
+# Debian/Ubuntu: uses Netplan
+# RedHat/RHEL:   uses NetworkManager (nmcli) – already configured; task validates only
 
-- name: Disable cloud-init network config management
+# ── Debian/Ubuntu: Netplan-based setup ──────────────────────────────────────
+
+- name: "[Debian] Disable cloud-init network config management"
   ansible.builtin.copy:
     content: "network: {config: disabled}\n"
     dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
     owner: root
     group: root
     mode: '0644'
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Deploy custom netplan (keeps enp1s0 IP, adds enp7s0 DHCP + 192.168.0.0/16 route)
+- name: "[Debian] Deploy custom netplan (keeps enp1s0 IP, adds enp7s0 DHCP + 192.168.0.0/16 route)"
   ansible.builtin.template:
     src: netplan-sqlbuntu.yaml.j2
     dest: /etc/netplan/99-sqlbuntu.yaml
@@ -19,21 +25,23 @@
     group: root
     mode: '0600'
   register: netplan_result
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Remove original cloud-init netplan (replaced by 99-sqlbuntu.yaml)
+- name: "[Debian] Remove original cloud-init netplan (replaced by 99-sqlbuntu.yaml)"
   ansible.builtin.file:
     path: /etc/netplan/50-cloud-init.yaml
     state: absent
   register: cloud_init_removed
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Apply netplan (runs async so SSH over enp1s0 is not interrupted)
+- name: "[Debian] Apply netplan (runs async so SSH over enp1s0 is not interrupted)"
   ansible.builtin.command: netplan apply
-  when: netplan_result.changed or cloud_init_removed.changed
+  when: ansible_facts['os_family'] == 'Debian' and (netplan_result.changed or cloud_init_removed.changed)
   async: 60
   poll: 0
   register: netplan_apply_job
 
-- name: Wait for enp1s0 SSH to recover (IP unchanged, should be instant)
+- name: "[Debian] Wait for enp1s0 SSH to recover (IP unchanged, should be instant)"
   ansible.builtin.wait_for:
     host: "{{ internal_ip }}"
     port: 22
@@ -42,7 +50,34 @@
     state: started
   delegate_to: localhost
   become: false
-  when: netplan_result.changed or cloud_init_removed.changed
+  when: ansible_facts['os_family'] == 'Debian' and (netplan_result.changed or cloud_init_removed.changed)
+
+# ── RedHat/RHEL: NetworkManager (nmcli) – validate routing only ─────────────
+# Network is pre-configured on RHEL via nmcli before running this playbook.
+# This block verifies the expected routing is in place.
+
+- name: "[RedHat] Verify 192.168.0.0/16 route exists via enp1s0"
+  ansible.builtin.command: ip route show 192.168.0.0/16
+  register: rhel_route_check
+  changed_when: false
+  failed_when: rhel_route_check.rc != 0 or rhel_route_check.stdout == ''
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Verify default route exists (internet via enp7s0)"
+  ansible.builtin.command: ip route show default
+  register: rhel_default_route
+  changed_when: false
+  failed_when: rhel_default_route.rc != 0 or rhel_default_route.stdout == ''
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Report routing table"
+  ansible.builtin.debug:
+    msg:
+      - "192.168.0.0/16 route : {{ rhel_route_check.stdout }}"
+      - "Default route        : {{ rhel_default_route.stdout }}"
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# ── Both: verify internet reachability ──────────────────────────────────────
 
 - name: Wait for internet connectivity via enp7s0 (packages.microsoft.com)
   ansible.builtin.uri:

@@ -3,10 +3,9 @@
 # Partition /dev/vdb (120 GB), format ext4, mount at /mssql-data2, persist in fstab.
 
 - name: Install parted (needed for partition management)
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: parted
     state: present
-    update_cache: false
 
 - name: Check if disk2 partition already exists
   ansible.builtin.stat:

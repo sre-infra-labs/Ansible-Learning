@@ -1,12 +1,11 @@
 ---
 # 08-verify-connectivity.yml
-# All 6 validations run FROM the ryzen9 Ansible control node (delegate_to: localhost).
-# Validation 5 & 6 (sqlcmd queries) run ON sqlbuntu where sqlcmd is installed,
-# connecting to 192.168.100.54 to fully exercise the network path.
+# All host-specific values come from inventory (internal_ip, inventory_hostname)
+# or vars (mssql_port). Nothing is hardcoded to a specific host name.
 
-# ── 1. Ping ────────────────────────────────────────────────────────────
-- name: "[VAL-1] Ping sqlbuntu from ryzen9"
-  ansible.builtin.command: ping -c 4 -W 3 {{ verify_target_ip }}
+# ── 1. Ping ──────────────────────────────────────────────────────────────────
+- name: "[VAL-1] Ping {{ inventory_hostname }} from control node"
+  ansible.builtin.command: ping -c 4 -W 3 {{ internal_ip }}
   delegate_to: localhost
   become: false
   register: ping_result
@@ -16,24 +15,23 @@
   ansible.builtin.debug:
     msg: "{{ ping_result.stdout_lines[-2:] }}"
 
-# ── 2. Telnet / TCP port 1433 ─────────────────────────────────────────
-- name: "[VAL-2] TCP port 1433 reachable from ryzen9 (telnet style)"
+# ── 2. TCP port check ────────────────────────────────────────────────────────
+- name: "[VAL-2] TCP port {{ mssql_port }} reachable from control node"
   ansible.builtin.wait_for:
-    host: "{{ verify_target_ip }}"
-    port: "{{ verify_port }}"
+    host: "{{ internal_ip }}"
+    port: "{{ mssql_port }}"
     timeout: 15
     state: started
   delegate_to: localhost
   become: false
-  register: telnet_result
 
-- name: "[VAL-2] Port 1433 result"
+- name: "[VAL-2] Port {{ mssql_port }} result"
   ansible.builtin.debug:
-    msg: "Port {{ verify_port }} on {{ verify_target_ip }}: OPEN"
+    msg: "Port {{ mssql_port }} on {{ inventory_hostname }} ({{ internal_ip }}): OPEN"
 
-# ── 3. nc test ────────────────────────────────────────────────────────
-- name: "[VAL-3] nc test to sqlbuntu:1433 from ryzen9"
-  ansible.builtin.command: nc -zv -w 5 {{ verify_target_ip }} {{ verify_port }}
+# ── 3. nc test ───────────────────────────────────────────────────────────────
+- name: "[VAL-3] nc test to {{ inventory_hostname }}:{{ mssql_port }} from control node"
+  ansible.builtin.command: nc -zv -w 5 {{ internal_ip }} {{ mssql_port }}
   delegate_to: localhost
   become: false
   register: nc_result
@@ -41,12 +39,13 @@
 
 - name: "[VAL-3] nc result"
   ansible.builtin.debug:
-    msg: "nc: {{ nc_result.stderr | default(nc_result.stdout) }}"
+    msg: "nc → {{ inventory_hostname }}:{{ mssql_port }}: {{ nc_result.stderr | default(nc_result.stdout) }}"
 
-# ── 4. sqlcmd select 1 ───────────────────────────────────────────────
-- name: "[VAL-4] sqlcmd SELECT 1 against sqlbuntu (via network IP)"
+# ── 4. sqlcmd SELECT 1 ───────────────────────────────────────────────────────
+- name: "[VAL-4] sqlcmd SELECT 1 against {{ inventory_hostname }} ({{ internal_ip }})"
   ansible.builtin.command: >
-    /opt/mssql-tools18/bin/sqlcmd -S {{ verify_target_ip }},{{ verify_port }}
+    /opt/mssql-tools18/bin/sqlcmd
+    -S {{ internal_ip }},{{ mssql_port }}
     -U sa -Q "SELECT 1 AS connection_test" -C -N -W
   environment:
     SQLCMDPASSWORD: "{{ sa_password }}"
@@ -58,24 +57,37 @@
   ansible.builtin.debug:
     msg: "{{ sqlcmd_select1.stdout_lines }}"
 
-# ── 5. sqlcmd on StackOverflow2013 ───────────────────────────────────
-- name: "[VAL-5] sqlcmd SELECT 1 on StackOverflow2013"
+# ── 5. sqlcmd SELECT 1 on each restored database ────────────────────────────
+- name: "[VAL-5] sqlcmd SELECT 1 on each restored database"
   ansible.builtin.command: >
-    /opt/mssql-tools18/bin/sqlcmd -S {{ verify_target_ip }},{{ verify_port }}
-    -U sa -d {{ stackoverflow_db_name }}
-    -Q "SELECT 1 AS so_connection_test" -C -N -W
+    /opt/mssql-tools18/bin/sqlcmd
+    -S {{ internal_ip }},{{ mssql_port }}
+    -U sa -d {{ item.name }}
+    -Q "SELECT 1 AS db_connection_test" -C -N -W
   environment:
     SQLCMDPASSWORD: "{{ sa_password }}"
-  register: sqlcmd_so
+  register: sqlcmd_db
   changed_when: false
   ignore_errors: true
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
 
-- name: "[VAL-5] StackOverflow2013 sqlcmd result"
+- name: "[VAL-5] Database connectivity results"
   ansible.builtin.debug:
-    msg: "{{ sqlcmd_so.stdout_lines if sqlcmd_so.rc == 0 else ('FAILED: ' + sqlcmd_so.stderr | default('DB may not be restored yet')) }}"
+    msg: >-
+      {{ item.item.name }}: {{
+        'OK – ' + (item.stdout_lines | join(' '))
+        if item.rc == 0
+        else 'FAILED – ' + (item.stderr | default('DB may not be restored yet'))
+      }}
+  loop: "{{ sqlcmd_db.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
 
-# ── 6. sys.dm_server_services – engine + agent ───────────────────────
-- name: "[VAL-6] Check engine and SQL Agent via sys.dm_server_services"
+# ── 6. sys.dm_server_services – engine + agent ───────────────────────────────
+- name: "[VAL-6] Check engine and SQL Agent via sys.dm_server_services on {{ inventory_hostname }}"
   ansible.builtin.command: >
     /opt/mssql-tools18/bin/sqlcmd -S localhost,{{ mssql_port }} -U sa
     -Q "SET NOCOUNT ON;
@@ -92,18 +104,18 @@
   changed_when: false
   no_log: true
 
-- name: "[VAL-6] Service status"
+- name: "[VAL-6] Service status on {{ inventory_hostname }}"
   ansible.builtin.debug:
     msg: "{{ services_check.stdout_lines }}"
 
 - name: "[VAL-6] Fail if engine is not Running"
   ansible.builtin.fail:
-    msg: "SQL Server Engine is NOT Running – check sqlserver service"
+    msg: "SQL Server Engine is NOT Running on {{ inventory_hostname }} – check sqlserver service"
   when: >
     services_check.stdout_lines | select('search', 'MSSQLSERVER') | select('search', 'Running') | list | length == 0
 
 - name: "[VAL-6] Fail if SQL Agent is not Running"
   ansible.builtin.fail:
-    msg: "SQL Server Agent is NOT Running – check sqlagent.enabled setting"
+    msg: "SQL Server Agent is NOT Running on {{ inventory_hostname }} – check sqlagent.enabled setting"
   when: >
     services_check.stdout_lines | select('search', 'SQL Server Agent') | select('search', 'Running') | list | length == 0

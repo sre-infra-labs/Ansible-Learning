@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 """
-Ansible-generated restore script – handles multi-file StackOverflow2013 backup.
-Variables are injected by Jinja2 before this script runs on the remote host.
+Ansible-generated restore script.
+Restores one database from a .bak file with auto-generated MOVE clauses.
+Variables are injected by Jinja2 at template-render time on the control node.
+
+File naming convention:
+  Primary data file : <DB_NAME>.mdf
+  Secondary data    : <DB_NAME>_2.ndf, <DB_NAME>_3.ndf, …
+  Log file          : <DB_NAME>.ldf
 """
-import subprocess, sys, os
+import glob, subprocess, sys, os
 
-env = dict(os.environ)
-env['SQLCMDPASSWORD'] = '{{ sa_password }}'
-
+# ── Variables injected by Jinja2 ─────────────────────────────────────────────
 SQLCMD   = '/opt/mssql-tools18/bin/sqlcmd'
 SERVER   = 'localhost,{{ mssql_port }}'
-BAK_FILE = '{{ stackoverflow_bak_dest }}'
-DB_NAME  = '{{ stackoverflow_db_name }}'
-DEST_DIR = '{{ disk2_mount }}'
+BAK_FILE = '{{ item.bak_dest }}'
+DB_NAME  = '{{ item.name }}'
+DEST_DIR = '{{ item.data_destination }}'.rstrip('/')
 
-# ── Step 0: clean up any stale RESTORING state + physical files ──────────
-# Drop the RESTORING database from SQL Server's catalog, then delete
-# the old pre-allocated data files so the restore starts from a clean state.
+# SQLCMDPASSWORD is set in the environment by the Ansible task (no_log on template)
+env = dict(os.environ)
+
+# ── Step 0: clean up stale RESTORING state + physical files ──────────────────
 cleanup_q = (
     f"IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{DB_NAME}' "
     f"AND state_desc = 'RESTORING') "
@@ -28,16 +33,20 @@ r0 = subprocess.run(
     capture_output=True, text=True, env=env, timeout=120
 )
 print(f"Cleanup rc={r0.returncode} | {r0.stdout.strip()} | {r0.stderr.strip()}")
-# Delete pre-allocated physical files so RESTORE creates them fresh (no REPLACE needed)
-stale_exts = ['.mdf', '_2.ndf', '_3.ndf', '_4.ndf', '_5.ndf', '_log.ldf']
-for ext in stale_exts:
-    fpath = f'{DEST_DIR}/StackOverflow2013{ext}'
-    if os.path.exists(fpath):
+
+# Delete any pre-existing physical files matching the naming convention
+stale_patterns = [
+    f'{DEST_DIR}/{DB_NAME}.mdf',
+    f'{DEST_DIR}/{DB_NAME}_*.ndf',
+    f'{DEST_DIR}/{DB_NAME}.ldf',
+]
+for pattern in stale_patterns:
+    for fpath in glob.glob(pattern):
         os.unlink(fpath)
         print(f"Deleted stale file: {fpath}")
 sys.stdout.flush()
 
-# ── Step 1: get logical file list ───────────────────────────────────────
+# ── Step 1: get logical file list via RESTORE FILELISTONLY ───────────────────
 r = subprocess.run(
     [SQLCMD, '-S', SERVER, '-U', 'sa',
      '-Q', f"RESTORE FILELISTONLY FROM DISK = N'{BAK_FILE}';",
@@ -48,8 +57,9 @@ if r.returncode != 0:
     print("FILELISTONLY failed:", r.stderr, file=sys.stderr)
     sys.exit(r.returncode)
 
+# Keep only pipe-delimited data rows; skip empty lines and "rows affected" noise
 lines = [l.strip() for l in r.stdout.splitlines()
-         if l.strip() and 'rows affected' not in l and l.strip().startswith('Stack')]
+         if l.strip() and 'rows affected' not in l and '|' in l]
 
 data_files = [l.split('|')[0].strip() for l in lines if '|D|' in l]
 log_files  = [l.split('|')[0].strip() for l in lines if '|L|' in l]
@@ -57,36 +67,35 @@ log_files  = [l.split('|')[0].strip() for l in lines if '|L|' in l]
 print(f"Data files : {data_files}")
 print(f"Log  files : {log_files}")
 
-# ── Step 2: build MOVE clauses ──────────────────────────────────────────
-moves = []
-for i, name in enumerate(data_files):
-    ext    = 'mdf' if i == 0 else 'ndf'
-    suffix = ''    if i == 0 else f'_{i + 1}'
-    dest   = f'{DEST_DIR}/StackOverflow2013{suffix}.{ext}'
-    moves.append(f"MOVE N'{name}' TO N'{dest}'")
+if not data_files:
+    print("ERROR: no data files found in FILELISTONLY output", file=sys.stderr)
+    sys.exit(1)
 
-for name in log_files:
-    dest = f'{DEST_DIR}/StackOverflow2013_log.ldf'
-    moves.append(f"MOVE N'{name}' TO N'{dest}'")
+# ── Step 2: build MOVE clauses ───────────────────────────────────────────────
+moves = []
+for i, logical_name in enumerate(data_files):
+    if i == 0:
+        dest = f'{DEST_DIR}/{DB_NAME}.mdf'
+    else:
+        dest = f'{DEST_DIR}/{DB_NAME}_{i + 1}.ndf'
+    moves.append(f"MOVE N'{logical_name}' TO N'{dest}'")
+
+for logical_name in log_files:
+    dest = f'{DEST_DIR}/{DB_NAME}.ldf'
+    moves.append(f"MOVE N'{logical_name}' TO N'{dest}'")
 
 sql = (
-    # Set conservative max server memory before restore to prevent OOM /
-    # non-yielding-scheduler crashes on low-vCPU VMs.
     "EXEC sp_configure 'max server memory (MB)', 4096; RECONFIGURE;\n"
     "GO\n"
     f"RESTORE DATABASE [{DB_NAME}]\n"
     f"FROM DISK = N'{BAK_FILE}'\n"
     f"WITH {','.join(chr(10) + '     ' + m for m in moves)},\n"
-    # BUFFERCOUNT / MAXTRANSFERSIZE: minimum I/O chunk size (64 KB) to force
-    # the restore worker to yield the SQLOS scheduler after every chunk.
-    # Prevents SOSSCHEDMON "non-yielding scheduler" crash on 2-vCPU VMs.
-    # No REPLACE needed since we deleted pre-allocated files in Step 0.
     f"     RECOVERY, STATS = 5,\n"
     f"     BUFFERCOUNT = 4,\n"
     f"     MAXTRANSFERSIZE = 65536;"
 )
 
-script_path = '/tmp/restore_so2013.sql'
+script_path = f'/tmp/restore_{DB_NAME}.sql'
 with open(script_path, 'w') as f:
     f.write(sql)
 
@@ -94,25 +103,23 @@ print(f"\nSQL script ({script_path}):\n{sql}\n")
 print("Starting RESTORE – this may take several minutes …")
 sys.stdout.flush()
 
-# ── Step 3: execute ──────────────────────────────────────────────────────
-# Write sqlcmd output directly to a log file (NOT via a pipe) to avoid
-# Python's pipe buffer filling up when SQL Server sends STATS progress
-# messages. A full pipe causes sqlcmd to block writing, which makes SQL
-# Server reset the TCP connection ("Communication link failure").
-restore_log = '/tmp/restore_so2013_output.log'
+# ── Step 3: execute restore ───────────────────────────────────────────────────
+# Write output to a file (not a pipe) to prevent buffer-full stalls when SQL
+# Server streams STATS progress messages (a full pipe causes a TCP reset).
+restore_log = f'/tmp/restore_{DB_NAME}_output.log'
 with open(restore_log, 'w') as out_fh:
     r2 = subprocess.run(
         [SQLCMD, '-S', SERVER, '-U', 'sa', '-i', script_path,
          '-C', '-N',
-         '-t', '0',   # no query timeout (restore can take many minutes)
-         '-l', '60'], # login timeout 60 s
+         '-t', '0',    # no query timeout – restore can take many minutes
+         '-l', '60'],  # login timeout 60 s
         stdout=out_fh,
         stderr=out_fh,
         env=env,
         timeout=7200,
     )
 
-# Print last portion of output for Ansible logging
+# Print tail of log for Ansible to capture
 try:
     with open(restore_log) as lf:
         content = lf.read()
@@ -120,7 +127,7 @@ try:
 except Exception as e:
     print(f"Could not read restore log: {e}")
 
-# Cleanup
+# Cleanup temp files
 for f in [script_path, restore_log]:
     try:
         os.unlink(f)

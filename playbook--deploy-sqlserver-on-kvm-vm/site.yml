@@ -8,8 +8,9 @@
 # Run only specific tag:
 #   ansible-playbook -i hosts.yml site.yml --vault-password-file=../vault-pass --tags network
 
-- name: Deploy SQL Server 2025 on sqlbuntu
-  hosts: sqlbuntu
+- name: Deploy SQL Server 2025
+  # hosts: sqlbuntu
+  hosts: all
   become: true
   remote_user: ansible
   gather_facts: true
@@ -18,6 +19,12 @@
   vars_files:
     - sensitive-values
     - vars/default.yml
+
+  pre_tasks:
+    - name: Bootstrap python3-apt on Debian/Ubuntu (required by apt module)
+      ansible.builtin.raw: dpkg -s python3-apt > /dev/null 2>&1 || apt-get install -y python3-apt
+      changed_when: false
+      when: ansible_facts['os_family'] == 'Debian'
 
   tasks:
 
@@ -45,9 +52,9 @@
       ansible.builtin.import_tasks: tasks/06-firewall.yml
       tags: [firewall]
 
-    - name: "[07] Restore StackOverflow2013 on Disk 2  (skip: --skip-tags restore)"
-      ansible.builtin.import_tasks: tasks/07-restore-stackoverflow.yml
-      tags: [restore, stackoverflow]
+    - name: "[07] Restore databases on Disk 2  (skip: --skip-tags restore)"
+      ansible.builtin.import_tasks: tasks/07-restore-databases.yml
+      tags: [restore, databases]
 
     - name: "[08] Validate – all 6 checks from ryzen9 control node"
       ansible.builtin.import_tasks: tasks/08-verify-connectivity.yml

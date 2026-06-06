@@ -1,8 +1,11 @@
 ---
 # 03-install-mssql.yml
-# Add Microsoft GPG key + SQL Server 2025 apt repo, then install mssql-server.
+# Add Microsoft GPG key + SQL Server 2025 repo, then install mssql-server.
+# Supports Debian/Ubuntu (apt) and RedHat/RHEL (dnf).
 
-- name: Install prerequisite packages
+# ── Debian/Ubuntu ────────────────────────────────────────────────────────────
+
+- name: "[Debian] Install prerequisite packages"
   ansible.builtin.apt:
     name:
       - curl
@@ -11,31 +14,69 @@
       - software-properties-common
     state: present
     update_cache: true
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Download and install Microsoft GPG key (signed-by approach)
+- name: "[Debian] Download and install Microsoft GPG key (signed-by approach)"
   ansible.builtin.shell:
     cmd: >
       curl -fsSL {{ mssql_ms_gpg_key_url }}
       | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
     creates: /usr/share/keyrings/microsoft-prod.gpg
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Add SQL Server 2025 repository for Ubuntu 24.04
+- name: "[Debian] Add SQL Server 2025 repository for Ubuntu 24.04"
   ansible.builtin.shell:
     cmd: >
       curl -fsSL {{ mssql_repo_list_url }}
       | tee /etc/apt/sources.list.d/mssql-server-2025.list
     creates: /etc/apt/sources.list.d/mssql-server-2025.list
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Update apt cache after adding SQL Server 2025 repository
+- name: "[Debian] Update apt cache after adding SQL Server 2025 repository"
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 0
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Install SQL Server 2025 (mssql-server)
+- name: "[Debian] Install SQL Server 2025 (mssql-server)"
   ansible.builtin.apt:
     name: mssql-server
     state: present
-  register: mssql_pkg_installed
+  register: mssql_pkg_installed_deb
+  when: ansible_facts['os_family'] == 'Debian'
+
+# ── RedHat/RHEL ──────────────────────────────────────────────────────────────
+
+- name: "[RedHat] Install prerequisite packages"
+  ansible.builtin.dnf:
+    name:
+      - curl
+      - gnupg2
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Import Microsoft GPG key"
+  ansible.builtin.rpm_key:
+    key: "{{ mssql_ms_gpg_key_url }}"
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Add SQL Server 2025 repository for RHEL 9"
+  ansible.builtin.shell:
+    cmd: >
+      curl -fsSL {{ mssql_repo_rhel_url }}
+      | tee /etc/yum.repos.d/mssql-server-2025.repo
+    creates: /etc/yum.repos.d/mssql-server-2025.repo
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Install SQL Server 2025 (mssql-server)"
+  ansible.builtin.dnf:
+    name: mssql-server
+    state: present
+  register: mssql_pkg_installed_rhel
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# ── Both: verify installation ─────────────────────────────────────────────────
 
 - name: Verify mssql-server binary exists
   ansible.builtin.stat:

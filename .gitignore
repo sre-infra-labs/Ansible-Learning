@@ -24,6 +24,7 @@
 /temp-output-*
 /temp-log-*
 */Logs/*
+*/logs/*
 *.pyc
 *__pycache__*
 __pycache__/

@@ -1,3 +1,15 @@
+# Fix ssh key issue
+```bash
+|------------$ ssh-copy-id ansible@sqlred
+/usr/bin/ssh-copy-id: INFO: attempting to log in with the new key(s), to filter out any that are already installed
+/usr/bin/ssh-copy-id: INFO: 5 key(s) remain to be installed -- if you are prompted now it is to install the new keys
+Connection closed by 192.168.100.55 port 22
+
+# Fix
+ssh-copy-id -o PubkeyAuthentication=no ansible@sqlred
+
+```
+
 # For fixing internet issue on RHEL
 ```
 saanvi@sqlred:~$ ip a

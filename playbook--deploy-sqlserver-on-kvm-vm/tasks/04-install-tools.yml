@@ -1,34 +1,41 @@
 ---
 # 04-install-tools.yml
 # Install mssql-tools18 (sqlcmd, bcp), unixODBC, and PowerShell.
+# Supports Debian/Ubuntu (apt + debconf) and RedHat/RHEL (dnf + ACCEPT_EULA env).
 
-- name: Add Microsoft prod repository (for mssql-tools18 and powershell)
+# ── Debian/Ubuntu ────────────────────────────────────────────────────────────
+
+- name: "[Debian] Add Microsoft prod repository (for mssql-tools18 and powershell)"
   ansible.builtin.shell:
     cmd: >
       curl -fsSL {{ mssql_prod_repo_list_url }}
       | tee /etc/apt/sources.list.d/msprod.list
     creates: /etc/apt/sources.list.d/msprod.list
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Accept EULA for mssql-tools18 (debconf)
+- name: "[Debian] Accept EULA for mssql-tools18 (debconf)"
   ansible.builtin.debconf:
     name: mssql-tools18
     question: mssql-tools18/accept-eula
     value: "true"
     vtype: boolean
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Accept EULA for msodbcsql18 (debconf)
+- name: "[Debian] Accept EULA for msodbcsql18 (debconf)"
   ansible.builtin.debconf:
     name: msodbcsql18
     question: msodbcsql18/accept-eula
     value: "true"
     vtype: boolean
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Update apt cache after adding Microsoft prod repository
+- name: "[Debian] Update apt cache after adding Microsoft prod repository"
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 0
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Install mssql-tools18 (sqlcmd, bcp) and unixODBC
+- name: "[Debian] Install mssql-tools18 (sqlcmd, bcp) and unixODBC"
   ansible.builtin.apt:
     name:
       - mssql-tools18
@@ -36,13 +43,43 @@
     state: present
   environment:
     ACCEPT_EULA: "Y"
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Install PowerShell
+- name: "[Debian] Install PowerShell"
   ansible.builtin.apt:
     name: powershell
     state: present
   environment:
     ACCEPT_EULA: "Y"
+  when: ansible_facts['os_family'] == 'Debian'
+
+# ── RedHat/RHEL ──────────────────────────────────────────────────────────────
+
+- name: "[RedHat] Add Microsoft prod repository (for mssql-tools18 and powershell)"
+  ansible.builtin.shell:
+    cmd: >
+      curl -fsSL {{ mssql_prod_repo_rhel_url }}
+      | tee /etc/yum.repos.d/msprod.repo
+    creates: /etc/yum.repos.d/msprod.repo
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Install mssql-tools18 (sqlcmd, bcp) and unixODBC"
+  ansible.builtin.dnf:
+    name:
+      - mssql-tools18
+      - unixODBC-devel
+    state: present
+  environment:
+    ACCEPT_EULA: "Y"
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Install PowerShell"
+  ansible.builtin.dnf:
+    name: powershell
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# ── Both ─────────────────────────────────────────────────────────────────────
 
 - name: Add /opt/mssql-tools18/bin to system-wide PATH
   ansible.builtin.copy:

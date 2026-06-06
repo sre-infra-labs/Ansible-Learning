@@ -1,47 +1,103 @@
 ---
 # 06-firewall.yml
-# Install ufw and open all required ports.
+# Open all required ports.
+# Debian/Ubuntu: ufw
+# RedHat/RHEL:   firewalld
 
-- name: Install ufw
+# ── Debian/Ubuntu: ufw ───────────────────────────────────────────────────────
+
+- name: "[Debian] Install ufw"
   ansible.builtin.apt:
     name: ufw
     state: present
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Set ufw default incoming policy to deny
+- name: "[Debian] Set ufw default incoming policy to deny"
   community.general.ufw:
     default: deny
     direction: incoming
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Set ufw default outgoing policy to allow
+- name: "[Debian] Set ufw default outgoing policy to allow"
   community.general.ufw:
     default: allow
     direction: outgoing
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Allow required TCP ports
+- name: "[Debian] Allow required TCP ports"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
     proto: tcp
     comment: "SQL Server / infra"
   loop: "{{ firewall_tcp_ports }}"
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Allow required UDP ports
+- name: "[Debian] Allow required UDP ports"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
     proto: udp
     comment: "SQL Server browser / infra"
   loop: "{{ firewall_udp_ports }}"
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Enable ufw (non-interactive)
+- name: "[Debian] Enable ufw (non-interactive)"
   community.general.ufw:
     state: enabled
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Show ufw status
+- name: "[Debian] Show ufw status"
   ansible.builtin.command: ufw status verbose
   register: ufw_status
   changed_when: false
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Report firewall rules
+- name: "[Debian] Report firewall rules"
   ansible.builtin.debug:
     msg: "{{ ufw_status.stdout_lines }}"
+  when: ansible_facts['os_family'] == 'Debian'
+
+# ── RedHat/RHEL: firewalld ───────────────────────────────────────────────────
+
+- name: "[RedHat] Install firewalld"
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Start and enable firewalld"
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Allow required TCP ports"
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ firewall_tcp_ports }}"
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Allow required UDP ports"
+  ansible.posix.firewalld:
+    port: "{{ item }}/udp"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ firewall_udp_ports }}"
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Show firewalld open ports"
+  ansible.builtin.command: firewall-cmd --list-ports
+  register: firewalld_ports
+  changed_when: false
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "[RedHat] Report firewall rules"
+  ansible.builtin.debug:
+    msg: "Open ports: {{ firewalld_ports.stdout }}"
+  when: ansible_facts['os_family'] == 'RedHat'

@@ -4,10 +4,14 @@ mssql_version: "2025"
 mssql_pid: "Developer"         # Developer | Enterprise | Standard | Evaluation
 mssql_port: 1433
 
-# Microsoft package repositories (Ubuntu 24.04)
+# Microsoft package repositories (Ubuntu 24.04 – Debian family)
 mssql_repo_list_url: "https://packages.microsoft.com/config/ubuntu/24.04/mssql-server-2025.list"
 mssql_prod_repo_list_url: "https://packages.microsoft.com/config/ubuntu/24.04/prod.list"
 mssql_ms_gpg_key_url: "https://packages.microsoft.com/keys/microsoft.asc"
+
+# Microsoft package repositories (RHEL 9 – RedHat family)
+mssql_repo_rhel_url: "https://packages.microsoft.com/config/rhel/9/mssql-server-2025.repo"
+mssql_prod_repo_rhel_url: "https://packages.microsoft.com/config/rhel/9/prod.repo"
 
 # ── Directory layout (all on Disk 1 / root fs) ──────────────────────────
 mssql_base_dir: "/var/opt/mssql"
@@ -27,14 +31,10 @@ disk2_mount: "/mssql-data2"
 disk2_fstype: "ext4"
 
 # ── Network ─────────────────────────────────────────────────────────────
-internal_nic: "enp1s0"
-nat_nic: "enp7s0"
-internal_ip: "192.168.100.54"
 internal_prefix: "24"
 internal_dns_servers:
   - "192.168.100.10"
   - "192.168.200.10"
-internal_gateway: "192.168.100.10"
 internal_route_subnet: "192.168.0.0/16"
 ignore_internet_error: false
 
@@ -50,13 +50,14 @@ firewall_tcp_ports:
 firewall_udp_ports:
   - "1434"
 
-# ── StackOverflow restore ────────────────────────────────────────────────
-stackoverflow_bak_src: "/stale-storage/Softwares/SQL_Server_Setups/SqlServer-Samples-Dbs/StackOverflow2013.bak"
-stackoverflow_bak_dest: "/mssql-data2/StackOverflow2013.bak"
-stackoverflow_db_name: "StackOverflow2013"
-stackoverflow_data_file: "/mssql-data2/StackOverflow2013.mdf"
-stackoverflow_log_file: "/mssql-data2/StackOverflow2013_log.ldf"
+# ── Databases to Restore ────────────────────────────────────────────────
+databases_to_restore:
+  # - name: "StackOverflow2013"
+  #   bak_src: "/stale-storage/Softwares/SQL_Server_Setups/SqlServer-Samples-Dbs/StackOverflow2013.bak"
+  #   bak_dest: "/mssql-data2/StackOverflow2013.bak"
+  #   data_destination: "/mssql-data2/"
+  - name: "StackOverflowMini"
+    bak_src: "/stale-storage/Softwares/SQL_Server_Setups/SqlServer-Samples-Dbs/StackOverflowMini.bak"
+    bak_dest: "/mssql-data2/StackOverflowMini.bak"
+    data_destination: "/mssql-data2/"
 
-# ── Connectivity verification ────────────────────────────────────────────
-verify_target_ip: "192.168.100.54"
-verify_port: 1433

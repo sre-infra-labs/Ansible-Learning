@@ -96,7 +96,7 @@
 # needrestart sees stale shared libs in sqlservr and issues a systemctl
 # stop/start, which burns through StartLimitBurst and leaves the service
 # in start-limit-hit state until someone runs systemctl start manually.
-- name: Configure needrestart to ignore sqlservr binary
+- name: "[Debian] Configure needrestart to ignore sqlservr binary"
   ansible.builtin.copy:
     dest: /etc/needrestart/conf.d/90-sqlserver.conf
     owner: root
@@ -108,6 +108,7 @@
       # to avoid mid-transaction kills and start-limit-hit lockouts.
       $nrconf{blacklist_rc}{qr(^sqlserver)} = 0;
       push @{$nrconf{blacklist}}, qr(^/opt/mssql/bin/sqlservr$);
+  when: ansible_facts['os_family'] == 'Debian'
 
 - name: Reload systemd daemon to pick up sqlserver.service
   ansible.builtin.command: systemctl daemon-reload
