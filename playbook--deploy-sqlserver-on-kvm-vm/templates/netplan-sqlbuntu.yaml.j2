@@ -1,0 +1,25 @@
+# Managed by Ansible – do not edit manually
+# Recreate with: ansible-playbook -i hosts.yml site.yml --tags network
+network:
+  version: 2
+  ethernets:
+    {{ internal_nic }}:
+      addresses:
+        - "{{ internal_ip }}/{{ internal_prefix }}"
+      nameservers:
+        addresses:
+{% for dns in internal_dns_servers %}
+          - "{{ dns }}"
+{% endfor %}
+        search: []
+      routes:
+        # Route all 192.168.0.0/16 internal traffic through the internal NIC
+        - to: "{{ internal_route_subnet }}"
+          via: "{{ internal_gateway }}"
+          metric: 100
+    {{ nat_nic }}:
+      # NAT interface – provides internet default route via DHCP
+      dhcp4: true
+      dhcp4-overrides:
+        use-dns: false        # keep internal DNS; don't override with DHCP DNS
+        route-metric: 50      # lower metric = higher priority for default route

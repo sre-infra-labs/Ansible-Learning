@@ -1,0 +1,15 @@
++ Cluster: facebook-rpt-pg-prod (7489112576111385421) -----------------+----------------+-----------+----+-----------+
+| Member                 | Host                                        | Role           | State     | TL | Lag in MB |
++------------------------+---------------------------------------------+----------------+-----------+----+-----------+
+| facebook-postgres0     | facebook-postgres0.prod.lab.com             | Replica        | streaming |  2 |         0 |
+| facebook-postgres1     | facebook-postgres1.prod.lab.com             | Standby Leader | streaming |  2 |           |
+| facebook-postgres2     | facebook-postgres2.prod.lab.com             | Replica        | streaming |  2 |         0 |
++------------------------+---------------------------------------------+----------------+-----------+----+-----------+
+
++ Cluster: facebook-rpt-pg-prod (7489112576111385421) -----------------+----------------+-----------+----+-----------+
+| Member                 | Host                                        | Role           | State     | TL | Lag in MB |
++------------------------+---------------------------------------------+----------------+-----------+----+-----------+
+| facebook-postgres0     | facebook-postgres0.dr.lab.com               | Replica        | streaming |  2 |         0 |
+| facebook-postgres1     | facebook-postgres1.dr.lab.com               | Standby Leader | streaming |  2 |           |
+| facebook-postgres2     | facebook-postgres2.dr.lab.com               | Replica        | streaming |  2 |         0 |
++------------------------+---------------------------------------------+----------------+-----------+----+-----------+

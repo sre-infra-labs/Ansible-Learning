@@ -24,11 +24,20 @@
 /temp-output-*
 /temp-log-*
 */Logs/*
+*/logs/*
 *.pyc
 *__pycache__*
 __pycache__/
 .DS_Store
 vault-pass
+vault-password
+vault_pass
+vailt_password
+vault-key
+vault_key
+sensitive_values
+sensitive-values
+/work/*
 
 
 # Ignore Virtual Env Folder

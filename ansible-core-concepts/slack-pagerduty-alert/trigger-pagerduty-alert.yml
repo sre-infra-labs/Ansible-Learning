@@ -1,0 +1,82 @@
+---
+- name: Playbook to send PagerDuty Alert
+  hosts: localhost
+  become_user: root
+  remote_user: ansible
+  # become: true
+  gather_facts: false
+  vars:
+    # pagerduty_integration_key: "{{ PAGERDUTY_INTEGRATION_KEY }}"
+    pagerduty_integration_key: "{{ lookup('env', 'PAGERDUTY_INTEGRATION_KEY') }}"  # or hardcode token here
+    cluster_name: "FACEBOOK-PROD-CLUSTER"
+  tasks:
+    - name: Trigger PagerDuty Alert (Converted from curl)
+      register: pagerduty_response
+      vars:
+        cluster_name: "FACEBOOK-PROD-CLUSTER"
+      uri:
+        url: "https://events.pagerduty.com/v2/enqueue"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        status_code: 202  # PagerDuty returns 202 Accepted for success
+        body:
+          dedup_key: "{{ cluster_name }}"
+          routing_key: "{{ pagerduty_integration_key }}"
+          event_action: "trigger"
+          payload:
+            summary: "Patroni Cluster [{{ cluster_name }}] in UnHealthy State"
+            severity: "critical"
+            source: "Ansible Github Workflow"
+            component: "patronictl"
+            group: "PostgreSQL Alerting"
+            class: "patroni-cluster-issue"
+            custom_details:
+              cluster_name: "{{ cluster_name }}"
+              leader_node: facebok-postgres1.prod.lab.com
+              Issue: |
+                One or more replica is not in healthy state.
+
+                Kindly ssh to leader node, and run below command
+                patronictl -c /etc/patroni/patroni.yml list
+          client: "PostgreSQL Ansible Alert"
+          client_url: https://ajaydwivedi.pagerduty.com/service-directory/PTGZFDD/activity
+      when: true
+
+
+    - name: Debug pagerduty_response
+      ansible.builtin.debug:
+        var: pagerduty_response
+
+    - name: Trigger PagerDuty Alert for UnHealthy State
+      vars:
+        # cluster_dict: "{{ item | join('\n') | from_yaml }}"
+        cluster_name: "FACEBOOK-PROD-CLUSTER"
+        # cluster_leader_host: ""
+        # cluster_host_01: "{{ cluster_dict[0] }}"
+        # cluster_host_02: "{{ cluster_dict[1] }}"
+        # cluster_host_03: "{{ cluster_dict[2] }}"
+        # has_role_issue: >-
+        #   {{ cluster_host_01.Role not in good_roles or cluster_host_02.Role not in good_roles or cluster_host_03.Role not in good_roles }}
+        # has_state_issue: >-
+        #   {{ cluster_host_01.State not in good_states or cluster_host_02.State not in good_states or cluster_host_03.State not in good_states }}
+      community.general.pagerduty_alert:
+        integration_key: "{{ pagerduty_integration_key }}"
+        api_version: v2
+        source: Github Workflow [Check Cluster State]
+        state: triggered
+        desc: |
+          Patroni Cluster [{{ cluster_name }}] in UnHealthy State
+        incident_key: "{{ cluster_name }}"
+        client: PostgreSQL Ansible Alert
+        client_url: https://ajaydwivedi.pagerduty.com/service-directory/PTGZFDD/activity
+        component: patronictl
+        incident_class: patroni cluster issue
+        link_url: https://ajaydwivedi.pagerduty.com/service-directory/PTGZFDD/activity
+        link_text: Active PagerDuty Alerts
+      when: false
+
+# cd ansible-core-concepts/slack-pagerduty-alert
+# export PAGERDUTY_INTEGRATION_KEY=<YouPagerDutyIntegrationKey>
+# ansible-playbook -i hosts.yml trigger-pagerduty-alert.yml

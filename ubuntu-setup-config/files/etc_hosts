@@ -1,8 +1,0 @@
-192.168.100.1 ryzen9
-192.168.100.1 sqlmonitor
-192.168.100.18 pgprod
-192.168.100.31 server_ansible
-192.168.100.32 server_centos
-192.168.100.33 server_rhel
-192.168.100.34 server_ubuntu
-192.168.100.39 server_desktop

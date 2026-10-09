@@ -1,0 +1,25 @@
+---
+customize_user: parshuram
+# host_name: server-desktop
+# host_ipv4: 192.168.100.39
+
+
+# IMPORTANT: Generate vault file "sensitive_values" and vault password file "vault-pass" in parent directory of role
+
+inet1_network_ip: '192.168.100.0'
+inet1_hosts_entries:
+  - 192.168.100.10 sqlmonitor sqlmonitor.lab.com lab.com
+
+inet2_network_ip: '192.168.200.0'
+inet2_hosts_entries:
+  - 192.168.200.10 sqlmonitor sqlmonitor.lab.com lab.com
+
+bridge_network_ip: '192.168.1.0'
+bridge_hosts_entries:
+  - 192.168.1.6 ryzen9
+
+ignore_internet_error: true
+
+# python_version: "python3.12"
+update_package_cache: true
+upgrade_all_packages: true

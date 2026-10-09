@@ -1,0 +1,178 @@
+---
+# 05-configure-mssql.yml
+# Create directory layout, run mssql-conf setup, configure port/agent/dirs,
+# start the service, then move tempdb to its dedicated directory.
+
+- name: Create SQL Server directory structure (mssql owned)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mssql_os_user }}"
+    group: "{{ mssql_os_group }}"
+    mode: '0770'
+  loop:
+    - "{{ mssql_base_dir }}"
+    - "{{ mssql_data_dir }}"
+    - "{{ mssql_systemdbs_dir }}"
+    - "{{ mssql_tempdb_dir }}"
+    - "{{ mssql_userdbs_dir }}"
+    - "{{ mssql_backup_dir }}"
+    - "{{ mssql_log_dir }}"
+
+- name: Check if SQL Server master DB is already initialised
+  ansible.builtin.stat:
+    path: "{{ mssql_systemdbs_dir }}/master.mdf"
+  register: master_mdf
+
+- name: Run mssql-conf initial setup (non-interactive, only on first run)
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf -n setup
+  environment:
+    ACCEPT_EULA: "Y"
+    MSSQL_PID: "{{ mssql_pid }}"
+    MSSQL_SA_PASSWORD: "{{ sa_password }}"
+    MSSQL_TCP_PORT: "{{ mssql_port | string }}"
+    MSSQL_MASTER_DATA_FILE: "{{ mssql_systemdbs_dir }}/master.mdf"
+    MSSQL_MASTER_LOG_FILE: "{{ mssql_systemdbs_dir }}/mastlog.ldf"
+    MSSQL_DATA_DIR: "{{ mssql_systemdbs_dir }}"
+    MSSQL_LOG_DIR: "{{ mssql_systemdbs_dir }}"
+  when: not master_mdf.stat.exists
+  no_log: true
+
+# ── Post-init mssql-conf settings (always idempotent) ──────────────────
+- name: Set default data directory for new user databases
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf set filelocation.defaultdatadir {{ mssql_userdbs_dir }}
+
+- name: Set default log directory for new user databases
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf set filelocation.defaultlogdir {{ mssql_userdbs_dir }}
+
+- name: Set default backup directory
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf set filelocation.defaultbackupdir {{ mssql_backup_dir }}
+
+- name: Enable SQL Server Agent
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf set sqlagent.enabled true
+
+- name: Set TCP port to {{ mssql_port }}
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf set network.tcpport {{ mssql_port }}
+
+# ── Create independent sqlserver.service unit ───────────────────────────
+# A full unit file (not a symlink) so systemctl disable mssql-server
+# never removes it.  Conflicts= prevents both units running at once.
+- name: Create /etc/systemd/system/sqlserver.service unit file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sqlserver.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Microsoft SQL Server Database Engine
+      After=network.target auditd.service
+      Documentation=https://docs.microsoft.com/en-us/sql/linux
+      Conflicts=mssql-server.service
+
+      [Service]
+      ExecStart=/opt/mssql/bin/sqlservr
+      User=mssql
+      WorkingDirectory=/var/opt/mssql
+      KillMode=process
+      TimeoutSec=30min
+      LimitNPROC=infinity
+      LimitNOFILE=infinity
+      TasksMax=infinity
+      UMask=007
+      Restart=on-failure
+      RestartSec=10s
+      # Raised from default (3 in 120s) so transient unattended-upgrade
+      # restart storms (needrestart + daemon-reexec) don't permanently
+      # lock the service in start-limit-hit state.
+      StartLimitInterval=600
+      StartLimitBurst=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+# ── Prevent needrestart from auto-restarting SQL Server ────────────────
+# unattended-upgrades triggers needrestart after every package batch.
+# needrestart sees stale shared libs in sqlservr and issues a systemctl
+# stop/start, which burns through StartLimitBurst and leaves the service
+# in start-limit-hit state until someone runs systemctl start manually.
+- name: "[Debian] Configure needrestart to ignore sqlservr binary"
+  ansible.builtin.copy:
+    dest: /etc/needrestart/conf.d/90-sqlserver.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Do not auto-restart SQL Server when shared libraries are upgraded.
+      # SQL Server must be restarted deliberately (after a maintenance window)
+      # to avoid mid-transaction kills and start-limit-hit lockouts.
+      $nrconf{blacklist_rc}{qr(^sqlserver)} = 0;
+      push @{$nrconf{blacklist}}, qr(^/opt/mssql/bin/sqlservr$);
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Reload systemd daemon to pick up sqlserver.service
+  ansible.builtin.command: systemctl daemon-reload
+
+- name: Disable mssql-server autostart (use sqlserver instead)
+  ansible.builtin.command: systemctl disable mssql-server
+  ignore_errors: true
+
+# ── Enable + start service ──────────────────────────────────────────────
+- name: Enable sqlserver service
+  ansible.builtin.command: systemctl enable sqlserver
+
+- name: Restart sqlserver service
+  ansible.builtin.command: systemctl restart sqlserver
+
+- name: Wait for SQL Server to listen on port {{ mssql_port }}
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mssql_port }}"
+    delay: 10
+    timeout: 180
+
+# ── Move tempdb ─────────────────────────────────────────────────────────
+- name: Check current tempdb data file location
+  ansible.builtin.command: >
+    /opt/mssql-tools18/bin/sqlcmd -S localhost,{{ mssql_port }} -U sa
+    -Q "SET NOCOUNT ON; SELECT physical_name FROM sys.master_files WHERE name = 'tempdev'"
+    -h -1 -W -C -N
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  register: tempdb_location
+  changed_when: false
+  no_log: true
+
+- name: Move tempdb data file to {{ mssql_tempdb_dir }}
+  ansible.builtin.command: >
+    /opt/mssql-tools18/bin/sqlcmd -S localhost,{{ mssql_port }} -U sa
+    -Q "ALTER DATABASE tempdb MODIFY FILE (NAME = tempdev, FILENAME = '{{ mssql_tempdb_dir }}/tempdb.mdf');"
+    -C -N
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  when: mssql_tempdb_dir not in tempdb_location.stdout
+  register: tempdb_data_moved
+  no_log: true
+
+- name: Move tempdb log file to {{ mssql_tempdb_dir }}
+  ansible.builtin.command: >
+    /opt/mssql-tools18/bin/sqlcmd -S localhost,{{ mssql_port }} -U sa
+    -Q "ALTER DATABASE tempdb MODIFY FILE (NAME = templog, FILENAME = '{{ mssql_tempdb_dir }}/templog.ldf');"
+    -C -N
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  when: mssql_tempdb_dir not in tempdb_location.stdout
+  register: tempdb_log_moved
+  no_log: true
+
+- name: Restart SQL Server so tempdb move takes effect
+  ansible.builtin.command: systemctl restart sqlserver
+  when: (tempdb_data_moved is defined and tempdb_data_moved.changed) or
+        (tempdb_log_moved is defined and tempdb_log_moved.changed)
+
+- name: Wait for SQL Server ready after restart
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mssql_port }}"
+    delay: 10
+    timeout: 180

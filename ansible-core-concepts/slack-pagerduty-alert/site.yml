@@ -1,0 +1,11 @@
+- name: Ansible Role
+  hosts: all
+  remote_user: ansible
+  gather_facts: true
+  any_errors_fatal: true
+  become: true
+
+  roles:
+    - role: "{{ role_name }}"
+      vars:
+        minimal_ansible_version: 2.11.0

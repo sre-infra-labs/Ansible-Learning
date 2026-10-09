@@ -1,9 +1,0 @@
-#SPDX-License-Identifier: MIT-0
----
-# tasks file for roles/kvm
-# KVM & Virt Viewer
-  # > https://www.linuxtechi.com/how-to-install-kvm-on-ubuntu-22-04/
-  # > https://ubuntu.com/server/docs/virtualization-virt-tools
-  # > Reattach virtual machines
-  # > Ensure network ip in subnet 192.168.100.x & 192.168.200.x
-  # > Reboot after install

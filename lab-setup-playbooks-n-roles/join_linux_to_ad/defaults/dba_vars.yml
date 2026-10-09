@@ -1,0 +1,32 @@
+---
+debug: true
+
+ad_domain: "lab.com"
+computer_ou: "OU=LinuxServers,DC=corp,DC=example,DC=com"
+dba_ad_group: "sqldba"
+
+# IMPORTANT: Generate vault file "sensitive_values" and vault password file "vault-pass" in parent directory of role
+
+inet1_network_ip: '192.168.100.0'
+inet1_hosts_entries:
+  - 192.168.100.10 sqlmonitor sqlmonitor.lab.com lab.com LAB.COM
+
+inet2_network_ip: '192.168.200.0'
+inet2_hosts_entries:
+  - 192.168.200.10 sqlmonitor sqlmonitor.lab.com lab.com LAB.COM
+
+ignore_internet_error: false
+
+# python_version: "python3.12"
+update_package_cache: true
+upgrade_all_packages: true
+
+# pwd
+  # /home/saanvi/GitHub/Ansible-Learning/lab-setup-roles
+# |------------$ tree -L 1
+  # ├── hosts.yml
+  # ├── join_linux_to_ad
+  # ├── sensitive_values
+  # ├── site.yml
+  # └── vault-pass
+# ansible-playbook -i hosts.yml site.yml --vault-password-file=vault-pass

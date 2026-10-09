@@ -1,0 +1,134 @@
+---
+# 07-restore-stackoverflow.yml
+# Loop over databases_to_restore (defined in vars/default.yml).
+# For each database: copy .bak from control node, discover logical file names
+# via RESTORE FILELISTONLY, then RESTORE with auto-generated MOVE clauses.
+#
+# Skip this entire file:  --skip-tags restore
+
+# ── Phase 1: copy backups ────────────────────────────────────────────────────
+
+- name: Check if backup file exists on control node
+  ansible.builtin.stat:
+    path: "{{ item.bak_src }}"
+  delegate_to: localhost
+  become: false
+  register: bak_src_stats
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Fail if backup file is missing on control node
+  ansible.builtin.fail:
+    msg: "Backup not found on control node: {{ item.item.bak_src }}"
+  when: not item.stat.exists
+  loop: "{{ bak_src_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Check if backup already exists on target
+  ansible.builtin.stat:
+    path: "{{ item.bak_dest }}"
+  register: bak_dest_stats
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Copy backup to target (rsync) – skipped if already present
+  ansible.posix.synchronize:
+    src: "{{ item.item.bak_src }}"
+    dest: "{{ item.item.bak_dest }}"
+    mode: push
+    compress: false
+  when: not item.stat.exists
+  loop: "{{ bak_dest_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Ensure mssql user owns data_destination directories
+  ansible.builtin.file:
+    path: "{{ item.data_destination }}"
+    owner: "{{ mssql_os_user }}"
+    group: "{{ mssql_os_group }}"
+    mode: '0770'
+    state: directory
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Set correct ownership on backup files
+  ansible.builtin.file:
+    path: "{{ item.bak_dest }}"
+    owner: "{{ mssql_os_user }}"
+    group: "{{ mssql_os_group }}"
+    mode: '0640'
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ── Phase 2: determine which databases need restoring ────────────────────────
+
+- name: Check which databases already exist and are ONLINE
+  ansible.builtin.command: >
+    /opt/mssql-tools18/bin/sqlcmd -S localhost,{{ mssql_port }} -U sa
+    -Q "SET NOCOUNT ON; SELECT name FROM sys.databases WHERE name = '{{ item.name }}' AND state_desc = 'ONLINE'"
+    -h -1 -W -C -N
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  register: db_exists_results
+  changed_when: false
+  no_log: true
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Build list of databases that already exist (will be skipped)
+  ansible.builtin.set_fact:
+    existing_dbs: >-
+      {{ db_exists_results.results
+         | selectattr('stdout', 'search', '[a-zA-Z0-9]')
+         | map(attribute='item.name')
+         | list }}
+
+# ── Phase 3: restore missing databases ───────────────────────────────────────
+
+- name: Deploy restore Python script per database
+  ansible.builtin.template:
+    src: restore-stackoverflow.py.j2
+    dest: "/tmp/restore_{{ item.name }}.py"
+    owner: root
+    group: root
+    mode: '0700'
+  when: item.name not in existing_dbs
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Restore database (multi-file backup – handles all MOVE clauses)
+  ansible.builtin.command: "python3 /tmp/restore_{{ item.name }}.py"
+  environment:
+    SQLCMDPASSWORD: "{{ sa_password }}"
+  register: restore_results
+  async: 7200
+  poll: 30
+  when: item.name not in existing_dbs
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Clean up restore scripts
+  ansible.builtin.file:
+    path: "/tmp/restore_{{ item.name }}.py"
+    state: absent
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ── Phase 4: report ──────────────────────────────────────────────────────────
+
+- name: Report restore result per database
+  ansible.builtin.debug:
+    msg: "{{ item.name }}: {{ 'already existed – skipped' if item.name in existing_dbs else 'restore completed' }}"
+  loop: "{{ databases_to_restore }}"
+  loop_control:
+    label: "{{ item.name }}"

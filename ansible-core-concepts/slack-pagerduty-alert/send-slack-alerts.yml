@@ -1,0 +1,409 @@
+---
+- name: Send Slack message using Slack Bot OAuth Token
+  hosts: localhost
+  become_user: root
+  remote_user: ansible
+  become: true
+  gather_facts: false
+  vars:
+    # patronictl_log_file: /home/saanvi/GitHub/Ansible-Learning/private/patronictl_list.txt
+    patronictl_yaml_log_file: "{{ playbook_dir }}/patronictl_yaml_output.txt"
+    slack_token: "{{ lookup('env', 'SLACK_BOT_TOKEN') }}"  # or hardcode token here
+    slack_channel: "#sqlmonitor-alerts"  # or Slack channel ID like C12345678
+    slack_channel_id: "C04LKQF9RGV"
+    slack_thread_header: '*Patroni Cluster State on PostgreSQL Servers*'
+    lag_in_mb_threshold: 100
+    good_roles:
+      - Leader
+      - Standby Leader
+      - Replica
+      - Sync Standby
+    good_states:
+      - running
+      - streaming
+    leader_roles:
+      - Leader
+      - Standby Leader
+    slack_message: |
+      "+ Cluster: facebook-prod-rpt (7483087698268431571) -------------------+---------+----+-----------+",
+      "| Member            | Host                                  | Role    | State   | TL | Lag in MB |",
+      "+-------------------+---------------------------------------+---------+---------+----+-----------+",
+      "| facebok-postgres0 | facebok-postgres0.prod.lab.com        | Replica | stopped |    |   unknown |",
+      "| facebok-postgres1 | facebok-postgres1.prod.lab.com        | Replica | stopped |    |   unknown |",
+      "| facebok-postgres2 | facebok-postgres2.prod.lab.com        | Replica | stopped |    |   unknown |",
+      "+-------------------+---------------------------------------+---------+---------+----+-----------+"
+    slack_message_coded: |
+      ```
+      "+ Cluster: facebook-prod-rpt (7483087698268431571) --------+---------+----+-----------+",
+      "| Member            | Host                                  | Role    | State   | TL | Lag in MB |",
+      "+-------------------+---------------------------------------+---------+---------+----+-----------+",
+      "| facebok-postgres0 | facebok-postgres0.prod.lab.com        | Replica | stopped |    |   unknown |",
+      "| facebok-postgres1 | facebok-postgres1.prod.lab.com        | Replica | stopped |    |   unknown |",
+      "| facebok-postgres2 | facebok-postgres2.prod.lab.com        | Replica | stopped |    |   unknown |",
+      "+-------------------+---------------------------------------+---------+---------+----+-----------+"
+      ```
+    slack_message_coded2: |
+      ```
+      {{ slack_message }}
+      ```
+    slack_message_coded3: "``` {{ slack_message }} ```"
+
+  tasks:
+    # - name: Send Slack message using community.general.slack
+    #   community.general.slack:
+    #     token: "{{ slack_token }}"
+    #     msg: "{{ slack_message_coded2 }}"
+    #     channel: "{{ slack_channel }}"
+    #     # username: "AnsibleBot"
+    #     icon_emoji: ":robot_face:"
+    #     parse: "full"
+
+    - name: Send notification message via Slack all options
+      community.general.slack:
+        token: "{{ slack_token }}"
+        msg: '{{ inventory_hostname }} completed'
+        channel: "{{ slack_channel_id }}"
+        thread_id: '1539917263.000100'
+        username: 'Ansible on {{ inventory_hostname }}'
+        icon_url: http://www.example.com/some-image-file.png
+        link_names: 0
+        parse: 'none'
+
+    - name: Insert a color bar in front of the message for visibility purposes and use the default webhook icon and name configured
+        in Slack
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        msg: '{{ inventory_hostname }} is alive!'
+        color: good
+        username: ''
+        icon_url: ''
+
+    - name: Insert a color bar in front of the message with valid hex color value
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        msg: 'This message uses color in hex value'
+        color: '#00aacc'
+        username: ''
+        icon_url: ''
+
+    - name: Use the attachments API
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        attachments:
+          - text: Display my system load on host A and B
+            color: '#ff00dd'
+            title: System load
+            fields:
+              - title: System A
+                value: "load average: 0,74, 0,66, 0,63"
+                short: true
+              - title: System B
+                value: 'load average: 5,16, 4,64, 2,43'
+                short: true
+
+    - name: Use the blocks API
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        blocks:
+          - type: section
+            text:
+              type: mrkdwn
+              text: |-
+                *System load*
+                Display my system load on host A and B
+          - type: context
+            elements:
+              - type: mrkdwn
+                text: |-
+                  *System A*
+                  load average: 0,74, 0,66, 0,63
+              - type: mrkdwn
+                text: |-
+                  *System B*
+                  load average: 5,16, 4,64, 2,43
+
+    - name: Send a message with a link using Slack markup
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        msg: We sent this message using <https://www.ansible.com|Ansible>!
+
+    - name: Send a message with angle brackets and ampersands
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        msg: This message has &lt;brackets&gt; &amp; ampersands in plain text.
+
+    # - name: Initial Threaded Slack message
+    #   community.general.slack:
+    #     channel: "{{ slack_channel }}"
+    #     token: "{{ slack_token }}"
+    #     msg: 'Starting a thread with my initial post.'
+    #   register: slack_response
+
+    - name: "Read content of {{patronictl_yaml_log_file}}"
+      slurp:
+        src: "{{ patronictl_yaml_log_file }}"
+      register: patronictl_list_output_yaml
+
+    - name: "Decode {{patronictl_yaml_log_file}} file content"
+      set_fact:
+        patronictl_list_content_yaml: "{{ patronictl_list_output_yaml['content'] | b64decode}}"
+
+    - name: Print content of patronictl_list_content_yaml
+      debug:
+        var: patronictl_list_content_yaml
+
+    - name: Trim empty lines, convert to YAML, and create list
+      ansible.builtin.set_fact:
+        # cluster_list: "{{ item | from_yaml }}"
+        cluster_list: "{{ cluster_list | default([]) + [item | from_yaml] }}"
+      when: patronictl_list_content_yaml is defined and item != ''
+      loop: "{{ patronictl_list_content_yaml.split('\n') }}"
+
+    - name: Print Cluster Result
+      debug:
+          msg: "{{ item | join('\n') | from_yaml }}"
+      loop: "{{ cluster_list }}"
+
+    - name: Initialize counter
+      set_fact:
+        healthy_cluster_count: 0
+        unhealthy_cluster_count: 0
+        unhealthy_cluster_count_pagerduty: 0
+        lagged_cluster_count: 0
+
+    - name: Compute unhealthy_cluster_count
+      vars:
+          cluster_dict: "{{ item | join('\n') | from_yaml }}"
+          cluster_name: "{{ cluster_dict[0].Cluster }}"
+          cluster_host_01: "{{ cluster_dict[0] }}"
+          cluster_host_02: "{{ cluster_dict[1] }}"
+          cluster_host_03: "{{ cluster_dict[2] }}"
+          has_role_issue: >-
+            {{ cluster_host_01.Role not in good_roles or cluster_host_02.Role not in good_roles or cluster_host_03.Role not in good_roles }}
+          has_state_issue: >-
+            {{ cluster_host_01.State not in good_states or cluster_host_02.State not in good_states or cluster_host_03.State not in good_states }}
+      set_fact:
+        unhealthy_cluster_count: "{{ unhealthy_cluster_count | int + 1 }}"
+      when:
+        - has_role_issue or has_state_issue
+        # - clusters_to_ignore is not defined or cluster_name not in clusters_to_ignore
+      loop: "{{ cluster_list }}"
+
+    - name: Compute unhealthy_cluster_count_pagerduty
+      vars:
+          cluster_dict: "{{ item | join('\n') | from_yaml }}"
+          cluster_name: "{{ cluster_dict[0].Cluster }}"
+          cluster_host_01: "{{ cluster_dict[0] }}"
+          cluster_host_02: "{{ cluster_dict[1] }}"
+          cluster_host_03: "{{ cluster_dict[2] }}"
+          has_role_issue: >-
+            {{ cluster_host_01.Role not in good_roles or cluster_host_02.Role not in good_roles or cluster_host_03.Role not in good_roles }}
+          has_state_issue: >-
+            {{ cluster_host_01.State not in good_states or cluster_host_02.State not in good_states or cluster_host_03.State not in good_states }}
+      set_fact:
+        unhealthy_cluster_count_pagerduty: "{{ unhealthy_cluster_count_pagerduty | int + 1 }}"
+      when:
+        - has_role_issue or has_state_issue
+        - clusters_to_ignore is not defined or cluster_name not in clusters_to_ignore
+      loop: "{{ cluster_list }}"
+
+    - name: Compute healthy_cluster_count
+      vars:
+          cluster_dict: "{{ item | join('\n') | from_yaml }}"
+          # cluster_name: "{{ cluster_dict[0].Cluster }}"
+          cluster_host_01: "{{ cluster_dict[0] }}"
+          cluster_host_02: "{{ cluster_dict[1] }}"
+          cluster_host_03: "{{ cluster_dict[2] }}"
+          has_role_issue: >-
+            {{ cluster_host_01.Role not in good_roles or cluster_host_02.Role not in good_roles or cluster_host_03.Role not in good_roles }}
+          has_state_issue: >-
+            {{ cluster_host_01.State not in good_states or cluster_host_02.State not in good_states or cluster_host_03.State not in good_states }}
+      set_fact:
+        healthy_cluster_count: "{{ healthy_cluster_count | int + 1 }}"
+      when:
+        - not (has_role_issue or has_state_issue)
+      loop: "{{ cluster_list }}"
+
+    - name: Compute lagged_cluster_count
+      vars:
+        cluster_dict: "{{ item | join('\n') | from_yaml }}"
+        cluster_host_01: "{{ cluster_dict[0] }}"
+        cluster_host_02: "{{ cluster_dict[1] }}"
+        cluster_host_03: "{{ cluster_dict[2] }}"
+        lag_in_mb: >-
+          {{
+            [cluster_host_01['Lag in MB'] | default(0), cluster_host_02['Lag in MB'] | default(0), cluster_host_03['Lag in MB'] | default(0)]
+            | select('number') | list | default([0], true) | max
+          }}
+      set_fact:
+        lagged_cluster_count: "{{ lagged_cluster_count | int + 1 }}"
+      when:
+        - (lag_in_mb | int) >= lag_in_mb_threshold
+      loop: "{{ cluster_list }}"
+
+    - name: Patroni Cluster State Thread Initial Message
+      register: slack_response
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        blocks:
+          - type: "header"
+            text:
+              type: "plain_text"
+              text: "Patroni Cluster State on PostgreSQL Servers"
+              emoji: true
+          - type: "divider"
+          - type: "context"
+            elements:
+              - type: "mrkdwn"
+                text: ":white_check_mark: Healthy Clusters: *{{healthy_cluster_count}}*"
+          - type: "context"
+            elements:
+              - type: "mrkdwn"
+                text: ":X: UnHealthy Clusters: *{{unhealthy_cluster_count}}*"
+          - type: "divider"
+
+    - name: Add more info to thread
+      community.general.slack:
+        channel: "{{ slack_channel }}"
+        token: "{{ slack_token }}"
+        thread_id: "{{ slack_response['ts'] }}"
+        color: good
+        msg: 'And this is my threaded response!'
+
+    - name: Add code block to thread
+      community.general.slack:
+        channel: "{{ slack_channel }}"
+        token: "{{ slack_token }}"
+        thread_id: "{{ slack_response['ts'] }}"
+        # color: good
+        msg: "{{ slack_message_coded3 }}"
+        parse: "full"
+
+    - name: Construct Slack Message Per Cluster Level
+      vars:
+        cluster_dict: "{{ item | join('\n') | from_yaml }}"
+      debug:
+        msg: |
+          ClusterName: {{ cluster_dict[0].Cluster }}
+          Host: {{ cluster_dict[0].Host }}
+          Role: {{ cluster_dict[0].Role }}
+          State: {{ cluster_dict[0].State }}
+      loop: "{{ cluster_list }}"
+
+    - name: Debug variable
+      debug:
+        msg: "{{ cluster_list[0] | join('\n') | from_yaml }}"
+
+    - name: Send Unhealthy Patroni Cluster state results to thread
+      vars:
+        cluster_dict: "{{ item | join('\n') | from_yaml }}"
+        cluster_name: "{{ cluster_dict[0].Cluster }}"
+        cluster_host_01: "{{ cluster_dict[0] }}"
+        cluster_host_02: "{{ cluster_dict[1] }}"
+        cluster_host_03: "{{ cluster_dict[2] }}"
+        has_role_issue: >-
+          {{ cluster_host_01.Role not in good_roles or cluster_host_02.Role not in good_roles or cluster_host_03.Role not in good_roles }}
+        has_state_issue: >-
+          {{ cluster_host_01.State not in good_states or cluster_host_02.State not in good_states or cluster_host_03.State not in good_states }}
+        leader_host: >-
+          {{ cluster_dict
+            | selectattr('Role', 'in', leader_roles)
+            | map(attribute='Host')
+            | list
+            | first | default(cluster_host_02.Host)}}
+        lag_in_mb: >-
+          {{
+            [cluster_host_01['Lag in MB'] | default(0), cluster_host_02['Lag in MB'] | default(0), cluster_host_03['Lag in MB'] | default(0)]
+            | select('number') | list | default([0], true) | max
+          }}
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        thread_id: "{{ slack_response['ts'] }}"
+        attachments:
+          - color: '#FF0000'
+            text: "Cluster: {{ cluster_name }} || Leader: {{ leader_host }} || Lag_MB: {{ lag_in_mb }}"
+            fields:
+              - title: "{{ cluster_host_01.Host }}"
+                value: "Role: {{ cluster_host_01.Role }} || State: {{ cluster_host_01.State }}"
+                short: true
+              - title: "{{ cluster_host_02.Host }}"
+                value: "Role: {{ cluster_host_02.Role }} || State: {{ cluster_host_02.State }}"
+                short: true
+              - title: "{{ cluster_host_03.Host }}"
+                value: "Role: {{ cluster_host_03.Role }} || State: {{ cluster_host_03.State }}"
+                short: true
+      when: has_role_issue or has_state_issue
+      loop: "{{ cluster_list }}"
+
+    - name: Send Healthy Patroni Cluster state results to thread
+      vars:
+        cluster_dict: "{{ item | join('\n') | from_yaml }}"
+        cluster_name: "{{ cluster_dict[0].Cluster }}"
+        cluster_host_01: "{{ cluster_dict[0] }}"
+        cluster_host_02: "{{ cluster_dict[1] }}"
+        cluster_host_03: "{{ cluster_dict[2] }}"
+        has_role_issue: >-
+          {{ cluster_host_01.Role not in good_roles or cluster_host_02.Role not in good_roles or cluster_host_03.Role not in good_roles }}
+        has_state_issue: >-
+          {{ cluster_host_01.State not in good_states or cluster_host_02.State not in good_states or cluster_host_03.State not in good_states }}
+        leader_host: >-
+          {{ cluster_dict
+            | selectattr('Role', 'in', leader_roles)
+            | map(attribute='Host')
+            | list
+            | first }}
+        lag_in_mb: >-
+          {{
+            [cluster_host_01['Lag in MB'] | default(0), cluster_host_02['Lag in MB'] | default(0), cluster_host_03['Lag in MB'] | default(0)]
+            | select('number') | list | default([0], true) | max
+          }}
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        thread_id: "{{ slack_response['ts'] }}"
+        attachments:
+          - color: good
+            text: "Cluster: {{ cluster_name }} || Leader: {{ leader_host }} || Lag_MB: {{ lag_in_mb }}"
+            fields:
+              - title: "{{ cluster_host_01.Host }}"
+                value: "Role: {{ cluster_host_01.Role }} || State: {{ cluster_host_01.State }}"
+                short: true
+              - title: "{{ cluster_host_02.Host }}"
+                value: "Role: {{ cluster_host_02.Role }} || State: {{ cluster_host_02.State }}"
+                short: true
+              - title: "{{ cluster_host_03.Host }}"
+                value: "Role: {{ cluster_host_03.Role }} || State: {{ cluster_host_03.State }}"
+                short: true
+      when: not (has_role_issue or has_state_issue)
+      loop: "{{ cluster_list }}"
+
+    - name: Send a message to be edited later on
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        msg: Deploying something...
+      register: slack_response
+
+    - name: Edit message
+      community.general.slack:
+        token: "{{ slack_token }}"
+        # The 'channel' option does not accept the channel name. It must use the 'channel_id',
+        # which can be retrieved for example from 'slack_response' from the previous task.
+        channel: "{{ slack_response.channel }}"
+        msg: Deployment complete!
+        message_id: "{{ slack_response.ts }}"
+
+
+    # https://stackoverflow.com/a/78933760
+
+
+# nano ~/.bashrc
+# export SLACK_BOT_TOKEN=xoxb-your-slack-bot-token

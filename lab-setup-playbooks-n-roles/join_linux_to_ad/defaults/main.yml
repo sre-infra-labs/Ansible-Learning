@@ -1,0 +1,32 @@
+---
+
+common_packages:
+  - realmd
+  - sssd
+  - adcli
+  - oddjob
+  - oddjob-mkhomedir
+  - chrony
+
+debian_packages:
+  - packagekit
+  # - chrony
+  - sssd-tools
+  - sssd-common
+  - samba-common-bin
+  - libnss-sss
+  - libpam-sss
+
+rpm_packages:
+  - samba-common
+  - sssd-ad
+  - samba-common-tools
+  - krb5-workstation
+  - yum-utils
+
+# rhel_packages:
+#   - samba-common
+
+fedora_packages:
+  - python3-libdnf5
+

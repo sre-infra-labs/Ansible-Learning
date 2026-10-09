@@ -1,0 +1,18 @@
+---
+- name: Check if internet is reachable
+  ansible.builtin.command:
+    cmd: ping -c 1 google.com
+  register: ping_result
+  ignore_errors: yes
+  changed_when: false
+
+# - name: Check if internet is reachable
+#   ansible.netcommon.net_ping:
+#     dest: google.com
+#   register: ping_result
+#   ignore_errors: yes
+
+- name: Fail if no internet connection
+  ansible.builtin.fail:
+    msg: "No internet connectivity!"
+  when: ping_result.failed and ignore_internet_error is false

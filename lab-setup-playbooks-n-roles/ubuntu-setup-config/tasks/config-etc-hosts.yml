@@ -1,0 +1,110 @@
+---
+# - name: check file content
+#   ansible.builtin.debug:
+#     msg: "{{ lookup('file', '../files/etc_hosts') }}"
+
+# - name: Remove file if exists
+#   ansible.builtin.file:
+#     path: /tmp/etc_hosts
+#     state: absent
+
+# - name: Create file if not exists
+#   ansible.builtin.file:
+#     path: /tmp/etc_hosts
+#     state: touch
+
+- name: Find interface names for inet1
+  set_fact:
+    inet1_interface: >-
+      {{
+        (
+          ansible_facts
+          | dict2items
+          | selectattr('value.ipv4.network', 'defined')
+          | selectattr('value.ipv4.network', 'equalto', inet1_network_ip)
+          | map(attribute='key')
+        ) | first | default('')
+      }}
+
+- name: Find interface names for inet2
+  set_fact:
+    inet2_interface: >-
+      {{
+        (
+          ansible_facts
+          | dict2items
+          | selectattr('value.ipv4.network', 'defined')
+          | selectattr('value.ipv4.network', 'equalto', inet2_network_ip)
+          | map(attribute='key')
+        ) | first | default('')
+      }}
+
+- name: Find interface names for bridge network
+  set_fact:
+    bridge_interface: >-
+      {{
+        (
+          ansible_facts
+          | dict2items
+          | selectattr('value.ipv4.network', 'defined')
+          | selectattr('value.ipv4.network', 'equalto', bridge_network_ip)
+          | map(attribute='key')
+        ) | first | default('')
+      }}
+
+- name: Print interfaces and network ips
+  ansible.builtin.debug:
+    msg: >-
+      {%- if inet1_interface is defined and inet1_interface %}
+      [{{inet1_interface}}]=> {{inet1_network_ip}}
+      {%- endif %}
+
+      {%- if inet2_interface is defined and inet2_interface %}
+      [{{inet2_interface}}]=> {{inet2_network_ip}}
+      {%- endif %}
+
+      {%- if bridge_interface is defined and bridge_interface %}
+      [{{bridge_interface}}]=> {{bridge_network_ip}}
+      {%- endif %}
+
+# - name: Print /etc/hosts entries to be added
+#   ansible.builtin.debug:
+#     msg: >-
+#       {{ item }}
+#   loop: "{{ inet1_hosts_entries }}"
+#   when: inet1_interface is defined and inet1_interface
+
+- name: Update /etc/hosts for inet1
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK FOR INET1"
+    block: |
+      {% for entry in inet1_hosts_entries %}
+      {{ entry }}
+      {% endfor %}
+  when: inet1_interface is defined and inet1_interface
+
+- name: Update /etc/hosts for inet2
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK FOR INET2"
+    block: |
+      {% for entry in inet2_hosts_entries %}
+      {{ entry }}
+      {% endfor %}
+  when: inet2_interface is defined and inet2_interface
+
+- name: Update /etc/hosts for bridge network
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK FOR BRIDGE"
+    block: |
+      {% for entry in bridge_hosts_entries %}
+      {{ entry }}
+      {% endfor %}
+  when: bridge_interface is defined and bridge_interface
+
+- name: Check internet access using custom/check_internet.yml
+  include_tasks: custom/check_internet.yml
+  when: ignore_internet_error is defined and ignore_internet_error is false
+

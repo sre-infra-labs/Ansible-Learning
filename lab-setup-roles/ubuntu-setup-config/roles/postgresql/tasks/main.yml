@@ -1,6 +1,0 @@
-#SPDX-License-Identifier: MIT-0
----
-# tasks file for roles/postgres
-# Postgres & PgAdmin
-  # > https://medium.com/@malymohsem/say-goodbye-to-downtime-upgrade-postgresql-14-to-16-effortlessly-with-pg-upgrade-42ef4dbf8524
-  # > https://www.postgresql.org/download/linux/ubuntu/
